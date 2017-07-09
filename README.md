@@ -2,11 +2,11 @@
 remove directories which contain(s) btrfs snapshot(s) recursively 
 
 # How to use
-    # Dry run (-t flag)
+    # Dry run (-t flag) - does not delete anything
     sudo ./btrfs-rm -t DIRECTORY
 
 
-    # Delete
+    # Delete for real (See Risk!)
     sudo ./btrfs-rm DIRECTORY
 
 
