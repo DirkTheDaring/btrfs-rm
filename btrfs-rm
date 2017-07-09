@@ -139,7 +139,8 @@ class BTRFS:
       if DEBUG_LEVEL > 1:
         print(item)
     exit_code = proc.wait()
-    print("delete finished")
+    if DEBUG_LEVEL > 0:
+      print("delete finished")
 
   def findmnt(self):
     args = ['findmnt','-c','-n','-D']
