@@ -1,5 +1,5 @@
 # btrfs-rm
-remove directories which contain btrfs snapshot(s) recursively 
+remove directories which contain(s) btrfs snapshot(s) recursively 
 
 # How to use
     # Dry run (-t flag)
@@ -11,5 +11,5 @@ remove directories which contain btrfs snapshot(s) recursively
 
 
 # RISKS
-Use at your own risk. No warrany!
+Use at your own risk. No warranty!
 
