@@ -27,7 +27,7 @@
 # e.g. cleanup a broken docker directory with the above setup
 # (it will resolve all pathes first, figure out the snapshot names , remove them, and finally delete all other contents)
 
-# ./btrfs-rm  /var/lib/docker
+# ./btrfs-rm  /var/lib/docker/*
 
 
 from __future__ import print_function
