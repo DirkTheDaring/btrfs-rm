@@ -1,0 +1,312 @@
+#!/usr/bin/python
+# MIT License 
+# Copyright (c) 2017 Dietmar Kling
+
+# 
+# Delete a directory which contains btrfs snapshots recursively
+
+
+# Real Life scenaria
+# /dev/sda xfs  (rootfs on sda2)
+# /dev/sdb btrfs
+
+# /dev/sdb is mounted /data
+#
+# On startup a bind mount was created from  /var/lib/docker  to /data/var/lib/docker (all docker stuff goes now to /dev/sdb essentially)
+# It is hell, when docker  breaks (as it did in early versions)  to cleanup directories, especially if /dev/sdb contains other stuff.
+
+#  /        xfs
+#  /data    btrfs
+#  /var/lib/docker --> bind mount /data/var/lib/docker
+
+# Try to cleanup this with standard tools!!
+from __future__ import print_function
+
+import subprocess
+import re
+import os
+import sys
+import argparse
+
+DEBUG_LEVEL=0
+DRY_RUN=False
+
+class BTRFS: 
+
+  
+  def show(self, btrfs_dir):
+    if DEBUG_LEVEL > 1:
+      print("btrfs subvolume show %s" % btrfs_dir)
+ 
+    proc = subprocess.Popen(['btrfs','subvolume', 'show', btrfs_dir],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    array=[] 
+    for line in proc.stdout:
+      item=line.strip()
+      array.append(item)
+      if DEBUG_LEVEL > 1:
+        print(item)
+
+    exit_code = proc.wait()
+    return (exit_code,array)
+
+  def show_recursive(self, btrfs_dir):
+
+    result = self.show(btrfs_dir)
+    exit_code = result[0]
+    array     = result[1]
+
+    while exit_code == 1 and btrfs_dir != '/':
+      btrfs_dir = os.path.dirname(btrfs_dir)
+      result = self.show(btrfs_dir)
+      exit_code = result[0]
+      array     = result[1]
+
+    return (exit_code,btrfs_dir, array)
+
+  def find_btrfs(self, btrfs_dir):
+    exit_code,btrfs_dir, array = self.show_recursive(btrfs_dir)
+    if exit_code == 0:
+      if len(array) == 1:
+        btrfs_name=""
+      else:
+        btrfs_name = array[1].split()[1]
+      return (btrfs_dir, btrfs_name)
+    return ()
+
+  def list_raw(self,btrfs_dir):
+    if DEBUG_LEVEL > 0:
+     print("btrfs subvolume list -o %s" % btrfs_dir)
+    proc = subprocess.Popen(['btrfs','subvolume', 'list', '-o', btrfs_dir ],stdout=subprocess.PIPE)
+    array=[]
+    for line in proc.stdout:
+      item = line.rstrip()
+      #print(item)
+      array.append(item)
+    exit_code = proc.wait()
+    return (exit_code, array)
+
+  def list(self,btrfs_dir, btrfs_name, target_dir):
+    exit_code, array = self.list_raw(btrfs_dir)
+
+    target_dir_without_prefix = target_dir[len(btrfs_dir):]
+    target_dir = target_dir_without_prefix
+
+    # Somehow we need to fix this
+    if target_dir.startswith("/"):
+      target_dir = target_dir[1:]
+
+#    print("btrfs_dir %s" % btrfs_dir)
+#    print("target_dir %s" % target_dir)
+
+    if exit_code == 0:
+      array2=[]
+      for line in array:
+        columns = line.split()
+        dir_path = columns[8]
+        #print(dir_path)
+        # remove volume name as prefix
+        if len(btrfs_name) > 0:
+          if dir_path.startswith(btrfs_name + '/'):
+            dir_path = dir_path[len(btrfs_name)+1:]
+            #print("dir_path2: %s" % dir_path)
+        
+        if dir_path.startswith(target_dir):
+          #print(dir_path)
+          array2.append('/'+dir_path)
+    return array2
+
+
+  def delete(self,dirname):
+    print("btrfs subvolume delete %s" % dirname)
+    if DRY_RUN:
+     return 
+    proc = subprocess.Popen(['btrfs','subvolume', 'delete', dirname],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in proc.stdout:
+      item=line.strip()
+      if DEBUG_LEVEL > 1:
+        print(item)
+    exit_code = proc.wait()
+    print("delete finished")
+
+  def findmnt(self):
+    args = ['findmnt','-c','-n','-D']
+    if DEBUG_LEVEL > 0:
+      print(" ".join(args))
+    # -c Canonicalize all printed paths
+    # -n No Headings
+    # -D Imitate the output of df
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    array=[]
+    for line in proc.stdout:
+      item = line.strip()
+      #if DEBUG:
+      #  print(item)
+      array.append(item)
+  
+    exit_code = proc.wait()
+    return (exit_code, array)
+
+
+  def find_match(self,dirname):
+    result = self.findmnt()
+    exit_code = result[0]
+    lines     = result[1]
+
+    if not exit_code == 0:
+      return []
+
+    longest_matching_target=""
+    source=""
+    for line in lines:
+      columns = line.split()
+      target  = columns[6] 
+      #print(target)
+      if ( target == '/' 
+           or dirname.startswith(target + '/') 
+           or  dirname == target 
+         ) and len(target) > len(longest_matching_target) :
+        longest_matching_target=target
+        source=columns[0]
+        #print("Source: %s" % source)
+
+    array = source.split("[")
+    array[1] = array[1][:-1]
+    source_0 =  array[0]
+    source_1 =  array[1]
+    result = (longest_matching_target, source_0, source_1) 
+    if DEBUG_LEVEL > 0:
+      print(result)
+    if longest_matching_target == '/':
+      return ()
+    for line in lines:
+      columns = line.split()
+      source  = columns[0] 
+      #print(source)
+      if source == source_0:
+        break
+
+    result2 = (longest_matching_target, columns[6]+source_1)
+    return result2
+
+  def find_mounted(self,dirname):
+    item=""
+    item2=""
+    item3=""
+    proc = subprocess.Popen(['findmnt','-c', '-n', dirname],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in proc.stdout:
+      array = line.strip().split()
+      if array[0] == dirname:
+        # e.g. item= /dev/sdb1[/var/lib/build]
+        item=array[1]
+        #print(item)
+        array2 = item.split("[")
+        item2 = array2[0]
+        item3 = array2[1]
+        item3 = item3[:-1]
+        break
+    exit_code = proc.wait()
+    return (item2,item3)
+
+  def find_mountpoint_path(self,bestmatch, mountpoint):
+    #print("bestmatch : %s" % bestmatch)
+    #print("mountpoint: %s" % mountpoint)
+
+    item=""
+    proc = subprocess.Popen(['findmnt','-c', '-n', mountpoint],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in proc.stdout:
+      #print(line)
+      array = line.strip().split()
+      if array[0] == bestmatch and  array[1].startswith(mountpoint + '['):
+        item = array[0]
+        break
+    exit_code = proc.wait()
+    return item
+
+  def rm_recursive(self,dirname):
+    args = [ 'rm', '-rf', dirname]
+    print(" ".join(args))
+    if DRY_RUN:
+     return 
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in proc.stdout:
+      print(line.strip())
+    exit_code = proc.wait()
+  
+def run(dirname):
+  
+  if DEBUG_LEVEL > 0:
+    print(dirname)
+
+  btrfs = BTRFS()
+
+  result = btrfs.find_match(dirname)
+  #print(result)
+  if result != ():
+    postfix = dirname[len(result[0]):]
+    #print(postfix)
+    dirname_canonical = result[1] + postfix
+    #print(dirname)
+  else:
+   dirname_canonical = dirname
+
+  btrfs_dir, btrfs_name = btrfs.find_btrfs(dirname_canonical)
+
+  if DEBUG_LEVEL > 0:
+    print(btrfs_dir, btrfs_name)
+
+  subdirs = btrfs.list(btrfs_dir, btrfs_name, dirname_canonical)
+
+  if DEBUG_LEVEL > 0:
+    print("Subdirs")
+    print(subdirs)
+
+  for subdir in subdirs:
+    btrfs.delete(subdir)
+  
+  btrfs.rm_recursive(dirname)
+
+def check_programs():
+  path_array = os.environ['PATH'].split(":")
+  for name in ['rm', 'btrfs', 'findmnt' ]:
+    found = False
+    for path in path_array:
+       filepath = os.path.join(path,name) 
+       if os.path.isfile(filepath):
+         #print(filepath)
+         found=True
+         break
+    if not found:
+      print("Necessary program not installed: "+ name)
+      print("Please install this before running btrfs-rm")
+      sys.exit(1)
+    
+
+if os.geteuid() != 0:
+  exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
+
+check_programs()
+
+parser = argparse.ArgumentParser("btrfs-rm")
+parser.add_argument('directories', metavar='directory', nargs='+',
+                    help='directory which contains btrfs snapshots ')
+parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
+parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=0,  help='set debug level')
+
+args = parser.parse_args()
+
+DEBUG_LEVEL=args.debug_level
+DRY_RUN=args.dry_run
+dirname_list=[]
+current_dir = os.getcwd()
+
+for name in args.directories:
+  if not name.startswith("/"):
+    name = current_dir + "/" + name
+  dirname_list.append(name)
+
+for dirname in dirname_list:
+  run(dirname)
