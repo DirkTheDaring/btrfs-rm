@@ -6,11 +6,13 @@
 # Delete a directory which contains btrfs snapshots recursively
 
 
-# Real Life scenaria
-# /dev/sda xfs  (rootfs on sda2)
-# /dev/sdb btrfs
+# Real Life scenario
 
-# /dev/sdb is mounted /data
+# /dev/sda2  xfs  (rootfs on sda2)
+# /dev/sdb   btrfs
+
+# /dev/sda2 mounted as /
+# /dev/sdb  mounted as /data
 #
 # On startup a bind mount was created from  /var/lib/docker  to /data/var/lib/docker (all docker stuff goes now to /dev/sdb essentially)
 # It is hell, when docker  breaks (as it did in early versions)  to cleanup directories, especially if /dev/sdb contains other stuff.
@@ -19,7 +21,15 @@
 #  /data    btrfs
 #  /var/lib/docker --> bind mount /data/var/lib/docker
 
-# Try to cleanup this with standard tools!!
+# Try to cleanup this with standard tool and you will get desperate.
+# This tool is here for making this easy again.
+
+# e.g. cleanup a broken docker directory with the above setup
+# (it will resolve all pathes first, figure out the snapshot names , remove them, and finally delete all other contents)
+
+# ./btrfs-rm  /var/lib/docker
+
+
 from __future__ import print_function
 
 import subprocess
