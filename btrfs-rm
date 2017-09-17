@@ -45,10 +45,11 @@ class BTRFS:
 
   
   def show(self, btrfs_dir):
+    args = ['btrfs','subvolume', 'show', btrfs_dir]
     if DEBUG_LEVEL > 1:
-      print("btrfs subvolume show %s" % btrfs_dir)
+      print(" ".join(args))
  
-    proc = subprocess.Popen(['btrfs','subvolume', 'show', btrfs_dir],
+    proc = subprocess.Popen(args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
 
@@ -87,9 +88,11 @@ class BTRFS:
     return ()
 
   def list_raw(self,btrfs_dir):
+    args = ['btrfs','subvolume', 'list', '-o', btrfs_dir ]
     if DEBUG_LEVEL > 0:
-     print("btrfs subvolume list -o %s" % btrfs_dir)
-    proc = subprocess.Popen(['btrfs','subvolume', 'list', '-o', btrfs_dir ],stdout=subprocess.PIPE)
+      print(" ".join(args))
+
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE)
     array=[]
     for line in proc.stdout:
       item = line.rstrip()
@@ -130,10 +133,11 @@ class BTRFS:
 
 
   def delete(self,dirname):
-    print("btrfs subvolume delete %s" % dirname)
+    args = ['btrfs','subvolume', 'delete', dirname]
+    print(" ".join(args))
     if DRY_RUN:
      return 
-    proc = subprocess.Popen(['btrfs','subvolume', 'delete', dirname],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     for line in proc.stdout:
       item=line.strip()
       if DEBUG_LEVEL > 1:
@@ -207,7 +211,8 @@ class BTRFS:
     item=""
     item2=""
     item3=""
-    proc = subprocess.Popen(['findmnt','-c', '-n', dirname],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    args = ['findmnt','-c', '-n', dirname]
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     for line in proc.stdout:
       array = line.strip().split()
       if array[0] == dirname:
@@ -227,7 +232,8 @@ class BTRFS:
     #print("mountpoint: %s" % mountpoint)
 
     item=""
-    proc = subprocess.Popen(['findmnt','-c', '-n', mountpoint],stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    args = ['findmnt','-c', '-n', mountpoint]
+    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     for line in proc.stdout:
       #print(line)
       array = line.strip().split()
