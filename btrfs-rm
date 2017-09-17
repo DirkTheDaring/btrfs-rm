@@ -114,6 +114,9 @@ class BTRFS:
 #    print("btrfs_dir %s" % btrfs_dir)
 #    print("target_dir %s" % target_dir)
 
+    if not target_dir.endswith("/"):
+        target_dir = target_dir + "/"
+
     if exit_code == 0:
       array2=[]
       for line in array:
