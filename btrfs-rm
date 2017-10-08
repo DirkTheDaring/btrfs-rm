@@ -1,332 +1,324 @@
 #!/usr/bin/python
-# MIT License 
-# Copyright (c) 2017 Dietmar Kling
-
-# 
-# Delete a directory which contains btrfs snapshots recursively
-
-
-# Real Life scenario
-
-# /dev/sda2  xfs  (rootfs on sda2)
-# /dev/sdb   btrfs
-
-# /dev/sda2 mounted as /
-# /dev/sdb  mounted as /data
-#
-# On startup a bind mount was created from  /var/lib/docker  to /data/var/lib/docker (all docker stuff goes now to /dev/sdb essentially)
-# It is hell, when docker  breaks (as it did in early versions)  to cleanup directories, especially if /dev/sdb contains other stuff.
-
-#  /        xfs
-#  /data    btrfs
-#  /var/lib/docker --> bind mount /data/var/lib/docker
-
-# Try to cleanup this with standard tool and you will get desperate.
-# This tool is here for making this easy again.
-
-# e.g. cleanup a broken docker directory with the above setup
-# (it will resolve all pathes first, figure out the snapshot names , remove them, and finally delete all other contents)
-
-# ./btrfs-rm  /var/lib/docker/*
-
-
-from __future__ import print_function
-
 import subprocess
-import re
 import os
-import sys
 import argparse
-
+DRY_RUN=True
 DEBUG_LEVEL=0
-DRY_RUN=False
-
 class BTRFS: 
 
-  
-  def show(self, btrfs_dir):
-    args = ['btrfs','subvolume', 'show', btrfs_dir]
-    if DEBUG_LEVEL > 1:
-      print(" ".join(args))
- 
+  def log_info(self, msg):
+    print("INFO: "+msg)
+  def log_error(self, msg):
+    print("ERROR: "+msg)
+
+  def subprocess(self, args):
     proc = subprocess.Popen(args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
+    return proc
 
-    array=[] 
-    for line in proc.stdout:
-      item=line.strip()
-      array.append(item)
-      if DEBUG_LEVEL > 1:
-        print(item)
-
+  def execute(self, args):
+    proc      = self.subprocess(args)
+    array     = self.read_stdout(proc.stdout)
     exit_code = proc.wait()
     return (exit_code,array)
 
-  def show_recursive(self, btrfs_dir):
+  def read_stdout(self, stream):
+    array=[] 
+    for line in stream:
+      # "chomp" 
+      item=line.rstrip("\n")
+      array.append(item)
+    return array
 
-    result = self.show(btrfs_dir)
-    exit_code = result[0]
-    array     = result[1]
-
-    while exit_code == 1 and btrfs_dir != '/':
-      btrfs_dir = os.path.dirname(btrfs_dir)
-      result = self.show(btrfs_dir)
-      exit_code = result[0]
-      array     = result[1]
-
-    return (exit_code,btrfs_dir, array)
+  def show(self, btrfs_dir, verbose=False):
+    args = ['btrfs','subvolume', 'show', btrfs_dir]
+    if DEBUG_LEVEL > 0:
+        self.log_info(" ".join(args))
+    return self.execute(args)
 
   def find_btrfs(self, btrfs_dir):
-    exit_code,btrfs_dir, array = self.show_recursive(btrfs_dir)
-    if exit_code == 0:
-      if len(array) == 1:
-        btrfs_name=""
-      else:
+    while True:
+        exit_code,array = self.show(btrfs_dir)
+        if btrfs_dir == '/':
+            break
+        if exit_code != 1:
+            break
+        # Move one level up
+        btrfs_dir = os.path.dirname(btrfs_dir)
+    if exit_code != 0:
+        return (None,None)
+    if len(array) == 1:
+        btrfs_name = ""
+    else:
         btrfs_name = array[1].split()[1]
-      return (btrfs_dir, btrfs_name)
-    return ()
+    return (btrfs_dir, btrfs_name)
 
-  def list_raw(self,btrfs_dir):
+  def subvolume_list_raw(self,btrfs_dir):
     args = ['btrfs','subvolume', 'list', '-o', btrfs_dir ]
     if DEBUG_LEVEL > 0:
       print(" ".join(args))
+    return self.execute(args)
 
-    proc = subprocess.Popen(args,stdout=subprocess.PIPE)
-    array=[]
-    for line in proc.stdout:
-      item = line.rstrip()
-      #print(item)
-      array.append(item)
-    exit_code = proc.wait()
-    return (exit_code, array)
+  def subvolume_list_extract_dirs(self, array):
+    result = []
+    for line in array:
+      columns     = line.split()
+      last_column = len(columns) - 1
+      dir_path    = columns[last_column]
+      result.append(dir_path)
+    return result
 
-  def list(self,btrfs_dir, btrfs_name, target_dir):
-    exit_code, array = self.list_raw(btrfs_dir)
+  def subvolume_list_filter(self,target_dir,btrfs_dir,btrfs_name, source2, array):
+    array   = self.subvolume_list_extract_dirs(array)
+    if btrfs_name == "<FS_TREE>":
+        filter1 = source2[1:] 
+    else:
+        filter1 = btrfs_name + "/"
+   
+    length  = len(filter1)
+    array2  = []
 
-    target_dir_without_prefix = target_dir[len(btrfs_dir):]
-    target_dir = target_dir_without_prefix
-
-    # Somehow we need to fix this
-    if target_dir.startswith("/"):
-      target_dir = target_dir[1:]
-
-#    print("btrfs_dir %s" % btrfs_dir)
-#    print("target_dir %s" % target_dir)
-
-    if not target_dir.endswith("/"):
-        target_dir = target_dir + "/"
-
-    if exit_code == 0:
-      array2=[]
-      for line in array:
-        columns = line.split()
-        dir_path = columns[8]
-        #print(dir_path)
-        # remove volume name as prefix
-        if len(btrfs_name) > 0:
-          if dir_path.startswith(btrfs_name + '/'):
-            dir_path = dir_path[len(btrfs_name)+1:]
-            #print("dir_path2: %s" % dir_path)
-        
-        if dir_path.startswith(target_dir):
-          #print(dir_path)
-          array2.append('/'+dir_path)
+    for item in array:
+        # filter for the btrfs_name prefix name
+        if item.startswith(filter1):
+            item2 = item[length:]
+            #print(item2)
+            if btrfs_name == "<FS_TREE>":
+                item3 = btrfs_dir + "/" +  filter1 + item2
+            else:
+                item3 = btrfs_dir + item2
+            #print(item3)
+            #print(target_dir, item3)
+            if target_dir == item3 or item3.startswith(target_dir + "/"):
+                array2.append(item3)
     return array2
 
+
+  def subvolume_list(self,btrfs_dir, btrfs_name, source2, target_dir):
+	exit_code, array= self.subvolume_list_raw(btrfs_dir)
+	if exit_code != 0:
+		return []
+        #print("\n".join(array))
+	subvolumes = self.subvolume_list_filter(target_dir,btrfs_dir,btrfs_name,source2,array)
+	return subvolumes
 
   def delete(self,dirname):
     args = ['btrfs','subvolume', 'delete', dirname]
     print(" ".join(args))
-    if DRY_RUN:
-     return 
-    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in proc.stdout:
-      item=line.strip()
-      if DEBUG_LEVEL > 1:
-        print(item)
-    exit_code = proc.wait()
+    if DRY_RUN == True:
+        return 
+
+    self.execute(args)
     if DEBUG_LEVEL > 0:
       print("delete finished")
+    # FIXME return code?
 
   def findmnt(self):
-    args = ['findmnt','-c','-n','-D']
-    if DEBUG_LEVEL > 0:
-      print(" ".join(args))
+    # findmnt
     # -c Canonicalize all printed paths
     # -n No Headings
     # -D Imitate the output of df
-    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    args = ['findmnt','-c','-n','-D']
+    if DEBUG_LEVEL > 0:
+      print(" ".join(args))
+    return self.execute(args)
 
-    array=[]
-    for line in proc.stdout:
-      item = line.strip()
-      #if DEBUG:
-      #  print(item)
-      array.append(item)
-  
-    exit_code = proc.wait()
-    return (exit_code, array)
 
+  def parse_btrfs_mount(self,source):
+    pos = source.find("[")
+    if pos == -1:
+        return [ source, ''  ]
+    pos_end = source.find("]", pos)
+    if pos_end == -1:
+        return [ source, '' ]
+
+    source1 = source[0:pos]
+    source2 = source[pos+1:pos_end]
+
+    return [ source1, source2 ]
+
+
+  def filter_findmnt_target(self,lines):
+    result = []
+
+    for line in lines:
+      columns     = line.split()
+      last_column = len(columns) - 1
+      source      = columns[0]          
+      target      = columns[last_column] 
+
+      # source can only be device path starting with a '/', everthing else is shm, tmpfs, etc.
+      if not source.startswith("/"):
+          continue
+      source1,source2      = self.parse_btrfs_mount(source)
+      result.append([source1,source2,target])
+
+    return result
+
+  # In the end this method wants to match the closed "mountpoint" coming from a bottom up to the tree
+  # So if the pathname is longer than any target mount points, we remove components of the dirname, to find
+  # a final "exact" match. This means we have then a (partial) match of the dirname path, which goes to the
+  # level where the mountpoint is
+
+  # Test case 1: dirname is shorter  --> match root '/'
+  # Test case 2: dirname is longer --> match mount point which matches first when coming from bottom (longest path) 
+  # so there is someimes an exact match, somethings not
+
+  def match_exact(self,name,lines):
+    i = 0
+    for line in lines:
+        source1,source2,target = line
+        #print("  "+target)
+        if target == name:
+            #print("  FOUND: "+target)
+            return i
+        i=i+1
+    return -1
+
+  def match_dirname(self,dirname,lines):
+
+    components = dirname.split('/')
+    length     = len(components)
+
+    for i in reversed(range (0,length)):
+
+        if    i == 0: name = "/"
+        else:         name = "/".join(components[0:i+1])
+
+        #print(name)
+        pos = self.match_exact(name,lines)
+        #print(pos)
+        if pos > -1:
+            #print(name)
+            #source1, source2, target = lines[pos]
+            #result = [ source1, source2, target, dirname]
+            result = lines[pos]
+            break
+
+    # There has to be always a match, otherwise this dirname was no absolute path
+
+    return result
+
+  def find_longest_entry(self,source1,filtered_lines):
+    result = ""
+    for line in filtered_lines:
+        _source1,_source2,_target = line
+        if _source1 == source1 and _source2 == '':
+            return _target
+    return ""
 
   def find_match(self,dirname):
-    result = self.findmnt()
-    exit_code = result[0]
-    lines     = result[1]
-
+    exit_code, lines = self.findmnt()
+    #print("\n".join(lines))
     if not exit_code == 0:
       return []
+    filtered_lines  = self.filter_findmnt_target(lines)
+    #print(filtered_lines)
 
-    longest_matching_target=""
-    source=""
-    for line in lines:
-      columns = line.split()
-      target  = columns[6] 
-      #print(target)
-      if ( target == '/' 
-           or dirname.startswith(target + '/') 
-           or  dirname == target 
-         ) and len(target) > len(longest_matching_target) :
-        longest_matching_target=target
-        source=columns[0]
-        #print("Source: %s" % source)
-
-    array = source.split("[")
-    array[1] = array[1][:-1]
-    source_0 =  array[0]
-    source_1 =  array[1]
-    result = (longest_matching_target, source_0, source_1) 
-    if DEBUG_LEVEL > 0:
-      print(result)
-    if longest_matching_target == '/':
-      return ()
-    for line in lines:
-      columns = line.split()
-      source  = columns[0] 
-      #print(source)
-      if source == source_0:
-        break
-
-    result2 = (longest_matching_target, columns[6]+source_1)
-    return result2
-
-  def find_mounted(self,dirname):
-    item=""
-    item2=""
-    item3=""
-    args = ['findmnt','-c', '-n', dirname]
-    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in proc.stdout:
-      array = line.strip().split()
-      if array[0] == dirname:
-        # e.g. item= /dev/sdb1[/var/lib/build]
-        item=array[1]
-        #print(item)
-        array2 = item.split("[")
-        item2 = array2[0]
-        item3 = array2[1]
-        item3 = item3[:-1]
-        break
-    exit_code = proc.wait()
-    return (item2,item3)
-
-  def find_mountpoint_path(self,bestmatch, mountpoint):
-    #print("bestmatch : %s" % bestmatch)
-    #print("mountpoint: %s" % mountpoint)
-
-    item=""
-    args = ['findmnt','-c', '-n', mountpoint]
-    proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in proc.stdout:
-      #print(line)
-      array = line.strip().split()
-      if array[0] == bestmatch and  array[1].startswith(mountpoint + '['):
-        item = array[0]
-        break
-    exit_code = proc.wait()
-    return item
+    result                  = self.match_dirname(dirname,filtered_lines)
+    source1,source2,target  = result
+    # If there is bind mount to the directory, there is an entry, with a longer target
+    prefix = self.find_longest_entry(source1, filtered_lines)
+    return [ source1, source2, prefix + target, prefix + dirname ]
 
   def rm_recursive(self,dirname):
     args = [ 'rm', '-rf', dirname]
     print(" ".join(args))
-    if DRY_RUN:
+    if DRY_RUN == True:
      return 
+
     proc = subprocess.Popen(args,stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     for line in proc.stdout:
       print(line.strip())
     exit_code = proc.wait()
-  
-def run(dirname):
-  
-  if DEBUG_LEVEL > 0:
-    print(dirname)
-
-  btrfs = BTRFS()
-
-  result = btrfs.find_match(dirname)
-  #print(result)
-  if result != ():
-    postfix = dirname[len(result[0]):]
-    #print(postfix)
-    dirname_canonical = result[1] + postfix
-    #print(dirname)
-  else:
-   dirname_canonical = dirname
-
-  btrfs_dir, btrfs_name = btrfs.find_btrfs(dirname_canonical)
-
-  if DEBUG_LEVEL > 0:
-    print(btrfs_dir, btrfs_name)
-
-  subdirs = btrfs.list(btrfs_dir, btrfs_name, dirname_canonical)
-
-  if DEBUG_LEVEL > 0:
-    print("Subdirs")
-    print(subdirs)
-
-  for subdir in subdirs:
-    btrfs.delete(subdir)
-  
-  btrfs.rm_recursive(dirname)
-
-def check_programs():
-  path_array = os.environ['PATH'].split(":")
-  for name in ['rm', 'btrfs', 'findmnt' ]:
-    found = False
+  def find_program(self,name):
+    path_array = os.environ['PATH'].split(os.pathsep)
     for path in path_array:
-       filepath = os.path.join(path,name) 
-       if os.path.isfile(filepath):
-         #print(filepath)
-         found=True
-         break
-    if not found:
-      print("Necessary program not installed: "+ name)
-      print("Please install this before running btrfs-rm")
-      sys.exit(1)
-    
+        filepath = os.path.join(path,name) 
+        if os.path.isfile(filepath):
+            return True
+    return False
+  def find_programs(self, required_programs):
+    not_found_list = []
+    for name in required_programs:
+        found = self.find_program(name)
+        if not found:
+            not_found_list.append(name)
+    return not_found_list
 
-if os.geteuid() != 0:
-  exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
+  def self_check(self):
+    required_programs = [ 'rm', 'btrfs', 'findmnt' ]
+    not_found_list = self.find_programs(required_programs)
+    if len(not_found_list) > 0 :
+        msg = "Necessary program not found in PATH:" +  ",".join(not_found_list)
+        error_log(msg)
+        return False
+    return True
 
-check_programs()
+  def abspathes(self,path_list):
+    abspath_list=[]
+    for path in path_list:
+        abspath_list.append(os.path.abspath(path))
+    return abspath_list
 
-parser = argparse.ArgumentParser("btrfs-rm")
-parser.add_argument('directories', metavar='directory', nargs='+',
+  # Only Dirs as input (no files, no links etc.)
+  def get_subvolumes(self, dirname):
+    source1,source2,target,dirname = self.find_match(dirname)
+
+    # source == '' --> no btrfs mount point --> there are no subvolumes under this
+    is_btrfs_mount = (source2 != '' )
+    if not is_btrfs_mount:
+        return []
+
+    #print(target)
+    btrfs_dir, btrfs_name = self.find_btrfs(target)
+
+    if btrfs_dir is None:
+        return []
+
+    if DEBUG_LEVEL > 0:
+        print("btrfs_dir:  "+btrfs_dir)
+        print("btrfs_name: "+btrfs_name)
+        print("target:     "+target)
+
+    subvolumes = self.subvolume_list(btrfs_dir, btrfs_name, source2, dirname)
+    if DEBUG_LEVEL > 0:
+      print("Subdirs")
+      print("\n".join(subvolumes))
+
+    return subvolumes
+
+  # Only Dirs as input (no files, no links etc.)
+  def process_dir(self, dirname):
+    subvolumes = self.get_subvolumes(dirname)
+    for subvolume in subvolumes:
+      self.delete(subvolume)
+    self.rm_recursive(dirname)
+
+  def run(self,path_list):
+    if not self.self_check():
+        sys.exit(1)
+    abspath_list = self.abspathes(path_list)
+
+    for abspath in abspath_list:
+        if os.path.isdir(abspath):
+            self.process_dir(abspath)
+        else:
+           self.rm_recursive(abspath)
+
+
+if __name__ == '__main__':
+	if os.geteuid() != 0:
+		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
+	parser = argparse.ArgumentParser("btrfs-rm")
+	parser.add_argument('directories', metavar='directory', nargs='+',
                     help='directory which contains btrfs snapshots ')
-parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
-parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=0,  help='set debug level')
+	parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
+	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=0,  help='set debug level')
+	args = parser.parse_args()
+	DEBUG_LEVEL=args.debug_level
+	DRY_RUN=args.dry_run
+	btrfs = BTRFS()
+	btrfs.run(args.directories)
 
-args = parser.parse_args()
-
-DEBUG_LEVEL=args.debug_level
-DRY_RUN=args.dry_run
-dirname_list=[]
-current_dir = os.getcwd()
-
-for name in args.directories:
-  if not name.startswith("/"):
-    name = current_dir + "/" + name
-  dirname_list.append(name)
-
-for dirname in dirname_list:
-  run(dirname)
