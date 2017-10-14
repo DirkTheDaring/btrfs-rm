@@ -4,6 +4,110 @@ import os
 import argparse
 DRY_RUN=True
 DEBUG_LEVEL=0
+
+class FileSystemEntry:
+    source  = ""
+    target  = ""
+    mtype   = ""
+    options = ""
+    freq    = ""
+    passno  = ""
+
+    def __str__(self):
+        return self.source + " " + self.target + " " + self.mtype + " " + self.options
+
+class Mount:
+
+    def __init__(self):
+        self.entries = self.load()
+
+    def read_file_into_array(self,filename):
+        file = open(filename, 'r')
+        array = file.readlines()
+        file.close()
+        return array
+
+
+    def parse(self,array):
+        entries = []
+        for line in array:
+            cols = line.split()
+            fse  = FileSystemEntry()
+            fse.source  = cols[0]
+            fse.target  = cols[1]
+            fse.mtype   = cols[2]
+            fse.options = cols[3]
+            fse.freq    = cols[4]
+            fse.passno  = cols[5]
+            entries.append(fse)
+        return entries
+
+    def load(self):
+        array   = self.read_file_into_array('/proc/mounts')
+        entries = self.parse(array)
+        return entries
+
+    # Filters all virtual filesystems out (they do not start with '/')
+    def filter_by_path(self,entries):
+	result = []	
+        for o in self.entries:
+            if o.source.startswith("/"):
+               result.append(o)
+	return result
+
+    def longest_match(self, path, entries):
+        max_len = 0
+        result = None
+	for o in entries:
+            l = len(o.target)
+            if path.startswith(o.target) and l > max_len:
+                    result = o
+                    max_len = l
+        return result
+
+    def get_subvol(self, entry):
+        options = entry.options.split(",")
+        for option in options:
+            if option.startswith("subvol="):
+                return option[len("subvol="):]
+        return None
+
+    def find_root(self, source, entries):
+        for o in entries:
+            if o.source == source and self.get_subvol(o) == '/':
+                return o
+        return None
+
+    def resolve(self, path, entries):
+        entry = self.longest_match(path,entries)
+        if entry is None:
+            return path
+
+        subvol = self.get_subvol(entry)
+
+        if subvol is None:
+            return path
+
+        if subvol != '/':
+            postfix = path[len(entry.target):]
+            path    = self.resolve(subvol + postfix,entries)
+
+        root = self.find_root(entry.source,entries)
+
+        if root is None:
+            return path
+
+        if path.startswith(root.target):
+            return path
+
+        return (root.target + path)
+
+    def resolve_bind(self, path):
+	result = self.filter_by_path(self.entries)
+        result = self.resolve(path,result)
+        return result
+
+
 class BTRFS: 
 
   def log_info(self, msg):
@@ -100,6 +204,7 @@ class BTRFS:
 	if exit_code != 0:
 		return []
         #print("\n".join(array))
+        #exit(0)
 	subvolumes = self.subvolume_list_filter(target_dir,btrfs_dir,btrfs_name,source2,array)
 	return subvolumes
 
@@ -218,9 +323,12 @@ class BTRFS:
 
     result                  = self.match_dirname(dirname,filtered_lines)
     source1,source2,target  = result
-    # If there is bind mount to the directory, there is an entry, with a longer target
-    prefix = self.find_longest_entry(source1, filtered_lines)
-    return [ source1, source2, prefix + target, prefix + dirname ]
+    #print(source1,source2,target)
+    #exit(0)
+    ## If there is bind mount to the directory, there is an entry, with a longer target
+    #prefix = self.find_longest_entry(source1, filtered_lines)
+    #return [ source1, source2, prefix + target, prefix + dirname ]
+    return [ source1, source2, target, dirname ]
 
   def rm_recursive(self,dirname):
     args = [ 'rm', '-rf', dirname]
@@ -264,16 +372,20 @@ class BTRFS:
 
   # Only Dirs as input (no files, no links etc.)
   def get_subvolumes(self, dirname):
+    #print(dirname)
     source1,source2,target,dirname = self.find_match(dirname)
-
+    #print(source1,source2,target,dirname)
+    #exit(0)
     # source == '' --> no btrfs mount point --> there are no subvolumes under this
-    is_btrfs_mount = (source2 != '' )
-    if not is_btrfs_mount:
-        return []
+    #is_btrfs_mount = (source2 != '' )
+    #if not is_btrfs_mount:
+    #    return []
 
     #print(target)
-    btrfs_dir, btrfs_name = self.find_btrfs(target)
 
+    btrfs_dir, btrfs_name = self.find_btrfs(target)
+    #print(btrfs_dir, btrfs_name)
+    #exit(0)
     if btrfs_dir is None:
         return []
 
@@ -283,15 +395,18 @@ class BTRFS:
         print("target:     "+target)
 
     subvolumes = self.subvolume_list(btrfs_dir, btrfs_name, source2, dirname)
+
     if DEBUG_LEVEL > 0:
       print("Subdirs")
       print("\n".join(subvolumes))
 
     return subvolumes
 
-  # Only Dirs as input (no files, no links etc.)
+  # FIXME Only Dirs as input (no files, no links etc.)
   def process_dir(self, dirname):
     subvolumes = self.get_subvolumes(dirname)
+    #print(subvolumes)
+
     for subvolume in subvolumes:
       self.delete(subvolume)
     self.rm_recursive(dirname)
@@ -299,11 +414,14 @@ class BTRFS:
   def run(self,path_list):
     if not self.self_check():
         sys.exit(1)
-    abspath_list = self.abspathes(path_list)
 
+    mount = Mount()
+
+    abspath_list = self.abspathes(path_list)
     for abspath in abspath_list:
         if os.path.isdir(abspath):
-            self.process_dir(abspath)
+            bind_path = mount.resolve_bind(abspath)
+            self.process_dir(bind_path)
         else:
            self.rm_recursive(abspath)
 
