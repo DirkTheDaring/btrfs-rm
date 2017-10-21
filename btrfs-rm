@@ -82,6 +82,8 @@ class Mount:
         entry = self.longest_match(path,entries)
         if entry is None:
             return path
+        if entry.target == "/":
+            return  path
 
         subvol = self.get_subvol(entry)
 
@@ -90,14 +92,15 @@ class Mount:
 
         if subvol != '/':
             postfix = path[len(entry.target):]
-            path    = self.resolve(subvol + postfix,entries)
+            _path   = subvol + postfix
+            path    = self.resolve(_path,entries)
 
         root = self.find_root(entry.source,entries)
 
         if root is None:
             return path
 
-        if path.startswith(root.target):
+        if path == root.target or path.startswith(root.target + "/"):
             return path
 
         return (root.target + path)
