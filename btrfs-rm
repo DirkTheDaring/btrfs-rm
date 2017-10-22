@@ -2,9 +2,10 @@
 import subprocess
 import os
 import argparse
+import logging
 
 DRY_RUN=True
-DEBUG_LEVEL=0
+DEBUG_LEVEL=30
 
 class FileSystemEntry:
     source  = ""
@@ -113,11 +114,6 @@ class Mount:
 
 class BTRFS: 
 
-  def log_info(self, msg):
-    print("INFO: "+msg)
-  def log_error(self, msg):
-    print("ERROR: "+msg)
-
   def subprocess(self, args):
     proc = subprocess.Popen(args,
         stdout=subprocess.PIPE,
@@ -140,8 +136,7 @@ class BTRFS:
 
   def show(self, btrfs_dir, verbose=False):
     args = ['btrfs','subvolume', 'show', btrfs_dir]
-    if DEBUG_LEVEL > 0:
-        self.log_info(" ".join(args))
+    logger.debug(" ".join(args))
     return self.execute(args)
 
   def find_btrfs(self, btrfs_dir):
@@ -163,8 +158,7 @@ class BTRFS:
 
   def subvolume_list_raw(self,btrfs_dir):
     args = ['btrfs','subvolume', 'list', '-o', btrfs_dir ]
-    if DEBUG_LEVEL > 0:
-      print(" ".join(args))
+    logger.debug(" ".join(args))
     return self.execute(args)
 
   def subvolume_list_extract_dirs(self, array):
@@ -190,13 +184,10 @@ class BTRFS:
         # filter for the btrfs_name prefix name
         if item.startswith(filter1):
             item2 = item[length:]
-            #print(item2)
             if btrfs_name == "<FS_TREE>":
                 item3 = btrfs_dir + "/" +  filter1 + item2
             else:
                 item3 = btrfs_dir + item2
-            #print(item3)
-            #print(target_dir, item3)
             if target_dir == item3 or item3.startswith(target_dir + "/"):
                 array2.append(item3)
     return array2
@@ -206,20 +197,17 @@ class BTRFS:
 	exit_code, array= self.subvolume_list_raw(btrfs_dir)
 	if exit_code != 0:
 		return []
-        #print("\n".join(array))
-        #exit(0)
 	subvolumes = self.subvolume_list_filter(target_dir,btrfs_dir,btrfs_name,source2,array)
 	return subvolumes
 
   def delete(self,dirname):
     args = ['btrfs','subvolume', 'delete', dirname]
-    print(" ".join(args))
+    logger.info(" ".join(args))
     if DRY_RUN == True:
         return 
 
     self.execute(args)
-    if DEBUG_LEVEL > 0:
-      print("delete finished")
+    logger.debug("delete finished")
     # FIXME return code?
 
   def findmnt(self):
@@ -228,8 +216,7 @@ class BTRFS:
     # -n No Headings
     # -D Imitate the output of df
     args = ['findmnt','-c','-n','-D']
-    if DEBUG_LEVEL > 0:
-      print(" ".join(args))
+    logger.debug(" ".join(args))
     return self.execute(args)
 
 
@@ -277,9 +264,7 @@ class BTRFS:
     i = 0
     for line in lines:
         source1,source2,target = line
-        #print("  "+target)
         if target == name:
-            #print("  FOUND: "+target)
             return i
         i=i+1
     return -1
@@ -294,18 +279,13 @@ class BTRFS:
         if    i == 0: name = "/"
         else:         name = "/".join(components[0:i+1])
 
-        #print(name)
         pos = self.match_exact(name,lines)
-        #print(pos)
+
         if pos > -1:
-            #print(name)
-            #source1, source2, target = lines[pos]
-            #result = [ source1, source2, target, dirname]
             result = lines[pos]
             break
 
     # There has to be always a match, otherwise this dirname was no absolute path
-
     return result
 
   def find_longest_entry(self,source1,filtered_lines):
@@ -318,25 +298,17 @@ class BTRFS:
 
   def find_match(self,dirname):
     exit_code, lines = self.findmnt()
-    #print("\n".join(lines))
     if not exit_code == 0:
       return []
     filtered_lines  = self.filter_findmnt_target(lines)
-    #print(filtered_lines)
 
     result                  = self.match_dirname(dirname,filtered_lines)
     source1,source2,target  = result
-    #print(source1,source2,target)
-    #exit(0)
-    ## If there is bind mount to the directory, there is an entry, with a longer target
-    #prefix = self.find_longest_entry(source1, filtered_lines)
-    #return [ source1, source2, prefix + target, prefix + dirname ]
     return [ source1, source2, target, dirname ]
 
   def rm_recursive(self,dirname):
     args = [ 'rm', '-rf', dirname]
-    if DEBUG_LEVEL > 0:
-        print(" ".join(args))
+    logger.info(" ".join(args))
     if DRY_RUN == True:
      return 
 
@@ -374,46 +346,34 @@ class BTRFS:
     not_found_list = self.find_programs(required_programs,path_array)
 
     if len(not_found_list) > 0 :
-        msg = "Necessary program not found in PATH:" +  ",".join(not_found_list)
-        self.log_error(msg)
+        msg = "Necessary program not found in PATH: " +  ",".join(not_found_list)
+        logger.critical(msg)
         return False
     return True
 
   # Only Dirs as input (no files, no links etc.)
   def get_subvolumes(self, dirname):
     source1,source2,target,dirname = self.find_match(dirname)
-    #print(source1,source2,target,dirname)
-    #exit(0)
-    # source == '' --> no btrfs mount point --> there are no subvolumes under this
-    #is_btrfs_mount = (source2 != '' )
-    #if not is_btrfs_mount:
-    #    return []
-
-    #print(target)
 
     btrfs_dir, btrfs_name = self.find_btrfs(target)
-    #print(btrfs_dir, btrfs_name)
-    #exit(0)
+
     if btrfs_dir is None:
         return []
 
-    if DEBUG_LEVEL > 0:
-        print("btrfs_dir:  "+btrfs_dir)
-        print("btrfs_name: "+btrfs_name)
-        print("target:     "+target)
+    logger.debug("btrfs_dir:  "+btrfs_dir)
+    logger.debug("btrfs_name: "+btrfs_name)
+    logger.debug("target:     "+target)
 
     subvolumes = self.subvolume_list(btrfs_dir, btrfs_name, source2, dirname)
 
-    if DEBUG_LEVEL > 0:
-      print("Subdirs")
-      print("\n".join(subvolumes))
+    logger.debug("Subdirs")
+    logger.debug("\n".join(subvolumes))
 
     return subvolumes
 
   # FIXME Only Dirs as input (no files, no links etc.)
   def process_dir(self, dirname):
     subvolumes = self.get_subvolumes(dirname)
-    #print(subvolumes)
 
     for subvolume in subvolumes:
       self.delete(subvolume)
@@ -440,15 +400,22 @@ if __name__ == '__main__':
 	parser.add_argument('directories', metavar='directory', nargs='+',
                     help='directory which contains btrfs snapshots ')
 	parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
-	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=0,  help='set debug level')
+	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=logging.WARN,  help='set debug level')
 	args = parser.parse_args()
 
 	DEBUG_LEVEL=args.debug_level
 	DRY_RUN=args.dry_run
+        if DRY_RUN and DEBUG_LEVEL > 20:
+            DEBUG_LEVEL=20
 
         # after arg parse, so that somebody could at least use the -h option
 	if os.geteuid() != 0:
 		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
+        # Create logger
+        FORMAT = '%(message)s'
+        logging.basicConfig(format=FORMAT)
+        logger = logging.getLogger('btrfs-rm')
+        logger.setLevel(DEBUG_LEVEL)
 
 	btrfs = BTRFS()
 	btrfs.run(args.directories)
