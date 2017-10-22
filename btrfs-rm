@@ -2,6 +2,7 @@
 import subprocess
 import os
 import argparse
+
 DRY_RUN=True
 DEBUG_LEVEL=0
 
@@ -26,7 +27,6 @@ class Mount:
         array = file.readlines()
         file.close()
         return array
-
 
     def parse(self,array):
         entries = []
@@ -343,13 +343,23 @@ class BTRFS:
     for line in proc.stdout:
       print(line.strip())
     exit_code = proc.wait()
+
   def find_program(self,name):
-    path_array = os.environ['PATH'].split(os.pathsep)
+    try:
+        path_var = os.environ['PATH']
+    except KeyError:
+        return False
+
+    path_array = path_var.split(os.pathsep)
+
     for path in path_array:
+        if not os.path.isdir(path):
+            continue
         filepath = os.path.join(path,name) 
         if os.path.isfile(filepath):
             return True
     return False
+
   def find_programs(self, required_programs):
     not_found_list = []
     for name in required_programs:
@@ -367,15 +377,8 @@ class BTRFS:
         return False
     return True
 
-  def abspathes(self,path_list):
-    abspath_list=[]
-    for path in path_list:
-        abspath_list.append(os.path.abspath(path))
-    return abspath_list
-
   # Only Dirs as input (no files, no links etc.)
   def get_subvolumes(self, dirname):
-    #print(dirname)
     source1,source2,target,dirname = self.find_match(dirname)
     #print(source1,source2,target,dirname)
     #exit(0)
@@ -420,24 +423,24 @@ class BTRFS:
 
     mount = Mount()
 
-    abspath_list = self.abspathes(path_list)
-    for abspath in abspath_list:
-        if os.path.isdir(abspath):
+    for path in path_list:
+        if os.path.isdir(path):
+            abspath   = os.path.abspath(path)
             bind_path = mount.resolve_bind(abspath)
             self.process_dir(bind_path)
         else:
-           self.rm_recursive(abspath)
-
+           self.rm_recursive(path)
 
 if __name__ == '__main__':
 	if os.geteuid() != 0:
-		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
+		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
 	parser = argparse.ArgumentParser("btrfs-rm")
 	parser.add_argument('directories', metavar='directory', nargs='+',
                     help='directory which contains btrfs snapshots ')
 	parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
 	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=0,  help='set debug level')
 	args = parser.parse_args()
+
 	DEBUG_LEVEL=args.debug_level
 	DRY_RUN=args.dry_run
 	btrfs = BTRFS()
