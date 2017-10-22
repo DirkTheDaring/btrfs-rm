@@ -335,7 +335,8 @@ class BTRFS:
 
   def rm_recursive(self,dirname):
     args = [ 'rm', '-rf', dirname]
-    print(" ".join(args))
+    if DEBUG_LEVEL > 0:
+        print(" ".join(args))
     if DRY_RUN == True:
      return 
 
