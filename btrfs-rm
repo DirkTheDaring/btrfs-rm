@@ -52,7 +52,7 @@ class Mount:
     def filter_by_path(self,entries):
 	result = []	
         for o in self.entries:
-            if o.source.startswith("/"):
+            if o.source.startswith(os.sep):
                result.append(o)
 	return result
 
@@ -75,7 +75,7 @@ class Mount:
 
     def find_root(self, source, entries):
         for o in entries:
-            if o.source == source and self.get_subvol(o) == '/':
+            if o.source == source and self.get_subvol(o) == os.sep:
                 return o
         return None
 
@@ -83,7 +83,7 @@ class Mount:
         entry = self.longest_match(path,entries)
         if entry is None:
             return path
-        if entry.target == "/":
+        if entry.target == os.sep:
             return  path
 
         subvol = self.get_subvol(entry)
@@ -91,7 +91,7 @@ class Mount:
         if subvol is None:
             return path
 
-        if subvol != '/':
+        if subvol != os.sep:
             postfix = path[len(entry.target):]
             _path   = subvol + postfix
             path    = self.resolve(_path,entries)
@@ -101,7 +101,7 @@ class Mount:
         if root is None:
             return path
 
-        if path == root.target or path.startswith(root.target + "/"):
+        if path == root.target or path.startswith(root.target + os.sep):
             return path
 
         return (root.target + path)
@@ -142,7 +142,7 @@ class BTRFS:
   def find_btrfs(self, btrfs_dir):
     while True:
         exit_code,array = self.show(btrfs_dir)
-        if btrfs_dir == '/':
+        if btrfs_dir == os.sep:
             break
         if exit_code != 1:
             break
@@ -175,7 +175,7 @@ class BTRFS:
     if btrfs_name == "<FS_TREE>":
         filter1 = source2[1:] 
     else:
-        filter1 = btrfs_name + "/"
+        filter1 = btrfs_name + os.sep
    
     length  = len(filter1)
     array2  = []
@@ -185,10 +185,10 @@ class BTRFS:
         if item.startswith(filter1):
             item2 = item[length:]
             if btrfs_name == "<FS_TREE>":
-                item3 = btrfs_dir + "/" +  filter1 + item2
+                item3 = btrfs_dir + os.sep +  filter1 + item2
             else:
                 item3 = btrfs_dir + item2
-            if target_dir == item3 or item3.startswith(target_dir + "/"):
+            if target_dir == item3 or item3.startswith(target_dir + os.sep):
                 array2.append(item3)
     return array2
 
@@ -244,7 +244,7 @@ class BTRFS:
       target      = columns[last_column] 
 
       # source can only be device path starting with a '/', everthing else is shm, tmpfs, etc.
-      if not source.startswith("/"):
+      if not source.startswith(os.sep):
           continue
       source1,source2      = self.parse_btrfs_mount(source)
       result.append([source1,source2,target])
@@ -271,13 +271,13 @@ class BTRFS:
 
   def match_dirname(self,dirname,lines):
 
-    components = dirname.split('/')
+    components = dirname.split(os.sep)
     length     = len(components)
 
     for i in reversed(range (0,length)):
 
-        if    i == 0: name = "/"
-        else:         name = "/".join(components[0:i+1])
+        if    i == 0: name = os.sep
+        else:         name = os.sep.join(components[0:i+1])
 
         pos = self.match_exact(name,lines)
 
