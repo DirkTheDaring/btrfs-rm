@@ -436,8 +436,6 @@ class BTRFS:
            self.rm_recursive(path)
 
 if __name__ == '__main__':
-	if os.geteuid() != 0:
-		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
 	parser = argparse.ArgumentParser("btrfs-rm")
 	parser.add_argument('directories', metavar='directory', nargs='+',
                     help='directory which contains btrfs snapshots ')
@@ -447,6 +445,11 @@ if __name__ == '__main__':
 
 	DEBUG_LEVEL=args.debug_level
 	DRY_RUN=args.dry_run
+
+        # after arg parse, so that somebody could at least use the -h option
+	if os.geteuid() != 0:
+		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
+
 	btrfs = BTRFS()
 	btrfs.run(args.directories)
 
