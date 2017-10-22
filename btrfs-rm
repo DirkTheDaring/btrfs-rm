@@ -19,8 +19,8 @@ class FileSystemEntry:
 
 class Mount:
 
-    def __init__(self):
-        self.entries = self.load()
+    def __init__(self, proc_mounts_file='/proc/mounts'):
+        self.entries = self.load(proc_mounts_file)
 
     def read_file_into_array(self,filename):
         file = open(filename, 'r')
@@ -42,8 +42,8 @@ class Mount:
             entries.append(fse)
         return entries
 
-    def load(self):
-        array   = self.read_file_into_array('/proc/mounts')
+    def load(self, proc_mounts_file):
+        array   = self.read_file_into_array(proc_mounts_file)
         entries = self.parse(array)
         return entries
 
