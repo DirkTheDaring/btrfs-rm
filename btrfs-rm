@@ -344,14 +344,15 @@ class BTRFS:
       print(line.strip())
     exit_code = proc.wait()
 
-  def find_program(self,name):
+  def get_path(self):
     try:
-        path_var = os.environ['PATH']
+        path_var   = os.environ['PATH']
+        path_array = path_var.split(os.pathsep)
+        return path_array
     except KeyError:
-        return False
+        return []
 
-    path_array = path_var.split(os.pathsep)
-
+  def find_program(self,name,path_array):
     for path in path_array:
         if not os.path.isdir(path):
             continue
@@ -360,20 +361,20 @@ class BTRFS:
             return True
     return False
 
-  def find_programs(self, required_programs):
+  def find_programs(self,required_programs,path_array):
     not_found_list = []
     for name in required_programs:
-        found = self.find_program(name)
+        found = self.find_program(name,path_array)
         if not found:
             not_found_list.append(name)
     return not_found_list
 
-  def self_check(self):
-    required_programs = [ 'rm', 'btrfs', 'findmnt' ]
-    not_found_list = self.find_programs(required_programs)
+  def self_check(self,required_programs,path_array):
+    not_found_list = self.find_programs(required_programs,path_array)
+
     if len(not_found_list) > 0 :
         msg = "Necessary program not found in PATH:" +  ",".join(not_found_list)
-        error_log(msg)
+        self.log_error(msg)
         return False
     return True
 
@@ -418,8 +419,10 @@ class BTRFS:
     self.rm_recursive(dirname)
 
   def run(self,path_list):
-    if not self.self_check():
-        sys.exit(1)
+    path_array        = self.get_path()
+    required_programs = [ 'rm', 'btrfs', 'findmnt' ]
+    if not self.self_check(required_programs,path_array):
+        exit(1)
 
     mount = Mount()
 
