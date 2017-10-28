@@ -84,7 +84,7 @@ class Mount:
         if entry is None:
             return path
         if entry.target == os.sep:
-            return  path
+            return path
 
         subvol = self.get_subvol(entry)
 
@@ -94,6 +94,12 @@ class Mount:
         if subvol != os.sep:
             postfix = path[len(entry.target):]
             _path   = subvol + postfix
+            if _path == entry.target:
+                root = self.find_root(entry.source,entries)
+                if root is None:
+                    return  path
+                else:
+                    _path = root.target + _path
             path    = self.resolve(_path,entries)
 
         root = self.find_root(entry.source,entries)
