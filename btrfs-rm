@@ -3,6 +3,7 @@ import subprocess
 import os
 import argparse
 import logging
+import hashlib
 
 DRY_RUN=True
 DEBUG_LEVEL=30
@@ -18,7 +19,7 @@ class FileSystemEntry:
     def __str__(self):
         return self.source + " " + self.target + " " + self.mtype + " " + self.options
 
-class Mount:
+class Mount(object):
 
     def __init__(self, proc_mounts_file='/proc/mounts'):
         self.entries = self.load(proc_mounts_file)
@@ -112,7 +113,20 @@ class Mount:
         result = self.resolve(path,result)
         return result
 
-class ShellCmd:
+class MountRecorder(Mount):
+    def load(self, proc_mounts_file):
+        array   = self.read_file_into_array(proc_mounts_file)
+        content = "".join(array) 
+        text_file = open("rec_mounts", "w")
+        text_file.write(content)
+        text_file.close()
+
+        entries = self.parse(array)
+
+        return entries
+
+
+class ShellCmd(object):
 
     def subprocess(self, args):
         proc = subprocess.Popen(args,
@@ -134,13 +148,31 @@ class ShellCmd:
         exit_code   = proc.wait()
         return ( exit_code, array )
 
-class BTRFS: 
+class ShellCmdRecorder(ShellCmd):
+    def execute(self, args):
+        exit_code, array = super(ShellCmdRecorder,self).execute(args)
 
-  def __init__(self, shellCmd):
-    self.cmd = shellCmd
+        cmdline = " ".join(args)
+        filename_sha1 = hashlib.sha1(cmdline).hexdigest()
+        content = "\n".join(array)
+
+        text_file = open("rec_"+filename_sha1, "w")
+        text_file.write(cmdline + "\n")
+        text_file.write(str(exit_code) + "\n")
+        text_file.write(content + "\n")
+        text_file.close()
+
+        return (exit_code,array)
+
+
+class BTRFS(object):
+
+  def __init__(self, shellCmd, mount):
+    self.cmd   = shellCmd
+    self.mount = mount
 
   def show(self, btrfs_dir, verbose=False):
-    args = ['btrfs','subvolume', 'show', btrfs_dir]
+    args = ['btrfs','subvolume','show', btrfs_dir]
     logger.debug(" ".join(args))
     return self.cmd.execute(args)
 
@@ -390,12 +422,11 @@ class BTRFS:
     if not self.self_check(required_programs,path_array):
         exit(1)
 
-    mount = Mount()
 
     for path in path_list:
         if os.path.isdir(path):
             abspath   = os.path.abspath(path)
-            bind_path = mount.resolve_bind(abspath)
+            bind_path = self.mount.resolve_bind(abspath)
             self.process_dir(bind_path)
         else:
            self.rm_recursive(path)
@@ -406,6 +437,8 @@ if __name__ == '__main__':
                     help='directory which contains btrfs snapshots ')
 	parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
 	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=logging.WARN,  help='set debug level')
+	parser.add_argument('-r', '--record',  dest='record', action='store_true', default=False,  help='record shell cmd results for analysis')
+
 	args = parser.parse_args()
 
 	DEBUG_LEVEL=args.debug_level
@@ -422,7 +455,13 @@ if __name__ == '__main__':
         logger = logging.getLogger('btrfs-rm')
         logger.setLevel(DEBUG_LEVEL)
 
-        shellCmd = ShellCmd()
-	btrfs = BTRFS(shellCmd)
+        if args.record:
+            shellCmd = ShellCmdRecorder()
+            mount    = MountRecorder()
+        else:
+            shellCmd = ShellCmd()
+            mount    = Mount()
+
+	btrfs = BTRFS(shellCmd,mount)
 	btrfs.run(args.directories)
 
