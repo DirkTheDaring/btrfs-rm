@@ -112,33 +112,37 @@ class Mount:
         result = self.resolve(path,result)
         return result
 
+class ShellCmd:
+
+    def subprocess(self, args):
+        proc = subprocess.Popen(args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        return proc
+
+    def read_stdout(self, stream):
+        array=[] 
+        for line in stream:
+            item=line.rstrip("\n")
+            array.append(item)
+        return array
+
+    # The exit_code can be access from external then
+    def execute(self, args):
+        proc        = self.subprocess(args)
+        array       = self.read_stdout(proc.stdout)
+        exit_code   = proc.wait()
+        return ( exit_code, array )
 
 class BTRFS: 
 
-  def subprocess(self, args):
-    proc = subprocess.Popen(args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    return proc
-
-  def execute(self, args):
-    proc      = self.subprocess(args)
-    array     = self.read_stdout(proc.stdout)
-    exit_code = proc.wait()
-    return (exit_code,array)
-
-  def read_stdout(self, stream):
-    array=[] 
-    for line in stream:
-      # "chomp" 
-      item=line.rstrip("\n")
-      array.append(item)
-    return array
+  def __init__(self, shellCmd):
+    self.cmd = shellCmd
 
   def show(self, btrfs_dir, verbose=False):
     args = ['btrfs','subvolume', 'show', btrfs_dir]
     logger.debug(" ".join(args))
-    return self.execute(args)
+    return self.cmd.execute(args)
 
   def find_btrfs(self, btrfs_dir):
     while True:
@@ -160,7 +164,7 @@ class BTRFS:
   def subvolume_list_raw(self,btrfs_dir):
     args = ['btrfs','subvolume', 'list', '-o', btrfs_dir ]
     logger.debug(" ".join(args))
-    return self.execute(args)
+    return self.cmd.execute(args)
 
   def subvolume_list_extract_dirs(self, array):
     result = []
@@ -207,7 +211,7 @@ class BTRFS:
     if DRY_RUN == True:
         return 
 
-    self.execute(args)
+    self.cmd.execute(args)
     logger.debug("delete finished")
     # FIXME return code?
 
@@ -218,7 +222,7 @@ class BTRFS:
     # -D Imitate the output of df
     args = ['findmnt','-c','-n','-D']
     logger.debug(" ".join(args))
-    return self.execute(args)
+    return self.cmd.execute(args)
 
 
   def parse_btrfs_mount(self,source):
@@ -418,6 +422,7 @@ if __name__ == '__main__':
         logger = logging.getLogger('btrfs-rm')
         logger.setLevel(DEBUG_LEVEL)
 
-	btrfs = BTRFS()
+        shellCmd = ShellCmd()
+	btrfs = BTRFS(shellCmd)
 	btrfs.run(args.directories)
 
