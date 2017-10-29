@@ -1,5 +1,6 @@
 # btrfs-rm
-remove directories which contain(s) btrfs snapshot(s) recursively 
+remove directories which contain(s) btrfs snapshot(s) recursively.
+Works with python 2 and 3
 
 # Install
 On Centos/Fedora the following packages need to be installed:
