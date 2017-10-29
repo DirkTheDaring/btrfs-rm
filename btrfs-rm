@@ -1,5 +1,7 @@
 #!/usr/bin/python
 import subprocess
+import io
+import sys
 import os
 import argparse
 import logging
@@ -51,16 +53,16 @@ class Mount(object):
 
     # Filters all virtual filesystems out (they do not start with '/')
     def filter_by_path(self,entries):
-	result = []	
+        result = []	
         for o in self.entries:
             if o.source.startswith(os.sep):
                result.append(o)
-	return result
+        return result
 
     def longest_match(self, path, entries):
         max_len = 0
         result = None
-	for o in entries:
+        for o in entries:
             l = len(o.target)
             if path.startswith(o.target) and l > max_len:
                     result = o
@@ -109,7 +111,7 @@ class Mount(object):
         return (root.target + path)
 
     def resolve_bind(self, path):
-	result = self.filter_by_path(self.entries)
+        result = self.filter_by_path(self.entries)
         result = self.resolve(path,result)
         return result
 
@@ -144,7 +146,14 @@ class ShellCmd(object):
     # The exit_code can be access from external then
     def execute(self, args):
         proc        = self.subprocess(args)
-        array       = self.read_stdout(proc.stdout)
+
+        # Python2 vs Python3
+        if sys.version_info >= (3,0):
+            input_stream = io.TextIOWrapper(proc.stdout, encoding='utf-8')
+        else:
+            input_stream = proc.stdout
+
+        array       = self.read_stdout(input_stream)
         exit_code   = proc.wait()
         return ( exit_code, array )
 
@@ -231,11 +240,11 @@ class BTRFS(object):
 
 
   def subvolume_list(self,btrfs_dir, btrfs_name, source2, target_dir):
-	exit_code, array= self.subvolume_list_raw(btrfs_dir)
-	if exit_code != 0:
-		return []
-	subvolumes = self.subvolume_list_filter(target_dir,btrfs_dir,btrfs_name,source2,array)
-	return subvolumes
+        exit_code, array= self.subvolume_list_raw(btrfs_dir)
+        if exit_code != 0:
+            return []
+        subvolumes = self.subvolume_list_filter(target_dir,btrfs_dir,btrfs_name,source2,array)
+        return subvolumes
 
   def delete(self,dirname):
     args = ['btrfs','subvolume', 'delete', dirname]
@@ -432,23 +441,22 @@ class BTRFS(object):
            self.rm_recursive(path)
 
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser("btrfs-rm")
-	parser.add_argument('directories', metavar='directory', nargs='+',
+        parser = argparse.ArgumentParser("btrfs-rm")
+        parser.add_argument('directories', metavar='directory', nargs='+',
                     help='directory which contains btrfs snapshots ')
-	parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
-	parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=logging.WARN,  help='set debug level')
-	parser.add_argument('-r', '--record',  dest='record', action='store_true', default=False,  help='record shell cmd results for analysis')
+        parser.add_argument('-t', '--test',  dest='dry_run', action='store_true', default=False,  help='dry-run without actually deleting stuff')
+        parser.add_argument('-d', '--debug', metavar='level', dest='debug_level', type=int, default=logging.WARN,  help='set debug level')
+        parser.add_argument('-r', '--record',  dest='record', action='store_true', default=False,  help='record shell cmd results for analysis')
 
-	args = parser.parse_args()
-
-	DEBUG_LEVEL=args.debug_level
-	DRY_RUN=args.dry_run
+        args = parser.parse_args()
+        DEBUG_LEVEL=args.debug_level
+        DRY_RUN=args.dry_run
         if DRY_RUN and DEBUG_LEVEL > 20:
             DEBUG_LEVEL=20
 
         # after arg parse, so that somebody could at least use the -h option
-	if os.geteuid() != 0:
-		exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
+        if os.geteuid() != 0:
+            exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
         # Create logger
         FORMAT = '%(message)s'
         logging.basicConfig(format=FORMAT)
@@ -462,6 +470,6 @@ if __name__ == '__main__':
             shellCmd = ShellCmd()
             mount    = Mount()
 
-	btrfs = BTRFS(shellCmd,mount)
-	btrfs.run(args.directories)
+        btrfs = BTRFS(shellCmd,mount)
+        btrfs.run(args.directories)
 
