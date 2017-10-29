@@ -440,6 +440,14 @@ class BTRFS(object):
         else:
            self.rm_recursive(path)
 
+
+def save_cmdline(args):
+        content = "\n".join(args)
+        text_file = open("rec_cmdline", "w")
+        text_file.write(content+"\n")
+        text_file.close()
+
+
 if __name__ == '__main__':
         parser = argparse.ArgumentParser("btrfs-rm")
         parser.add_argument('directories', metavar='directory', nargs='+',
@@ -466,6 +474,7 @@ if __name__ == '__main__':
         if args.record:
             shellCmd = ShellCmdRecorder()
             mount    = MountRecorder()
+            save_cmdline(sys.argv)
         else:
             shellCmd = ShellCmd()
             mount    = Mount()
