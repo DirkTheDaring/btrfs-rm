@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 import subprocess
 import io
 import sys
@@ -162,7 +162,7 @@ class ShellCmdRecorder(ShellCmd):
         exit_code, array = super(ShellCmdRecorder,self).execute(args)
 
         cmdline = " ".join(args)
-        filename_sha1 = hashlib.sha1(cmdline).hexdigest()
+        filename_sha1 = hashlib.sha1(cmdline.encode("utf-8")).hexdigest()
         content = "\n".join(array)
 
         text_file = open("rec_"+filename_sha1, "w")
